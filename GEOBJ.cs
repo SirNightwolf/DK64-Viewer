@@ -1,4 +1,4 @@
-﻿// Decompiled with JetBrains decompiler
+// Decompiled with JetBrains decompiler
 // Type: WumbasWigwam.GEOBJ
 // Assembly: WumbasWigwam, Version=0.0.0.0, Culture=neutral, PublicKeyToken=null
 // MVID: 9E1B20CF-FC55-4FDF-8F94-7BCA06D01AA5
@@ -23,9 +23,12 @@ namespace WumbasWigwam
     }
 
     public static string convertVerts(
-      float[] vertexData,
-      byte[] vertexColorData,
-      float[] vertexTextureCoordData)
+      float[] vertexData = ...;           // x y z x y z ...
+      byte[] vertexColorData = ...;       // r g b a r g b a ...
+      float[] uvData = ...;               // u v u v ...
+      List<Tuple<uint, uint, uint>> faces = new();  // triangles (0-based)
+
+      GEOBJ.exportOBJ("Dogadon.obj", vertexData, vertexColorData, uvData, faces);
     {
       string str = "";
       int index1 = 0;
