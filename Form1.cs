@@ -1,4 +1,4 @@
-﻿// Decompiled with JetBrains decompiler
+// Decompiled with JetBrains decompiler
 // Type: DK64Viewer.Form1
 // Assembly: DK64Viewer, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null
 // MVID: 34C2999C-2061-412A-B2F3-E6D2C8F1D38B
@@ -153,9 +153,9 @@ namespace DK64Viewer
         GL.BindBuffer(BufferTarget.ArrayBuffer, this.vboVertexHandle);
         GL.VertexPointer(3, VertexPointerType.Float, 0, IntPtr.Zero);
         GL.BindBuffer(BufferTarget.ArrayBuffer, this.vboColorHandle);
-        GL.ColorPointer(4, ColorPointerType.Float, 0, IntPtr.Zero);
-        GL.BindBuffer(BufferTarget.ArrayBuffer, this.vboTexCoordHandle);
-        GL.TexCoordPointer(2, TexCoordPointerType.Float, 0, IntPtr.Zero);
+        GL.ColorPointer(4, ColorPointerType.UnsignedByte, 0, IntPtr.Zero);
+        GL.Enable(EnableCap.ColorMaterial); // Enable color modulation
+        GL.ColorMaterial(MaterialFace.FrontAndBack, ColorMaterialParameter.AmbientAndDiffuse);
         for (int index = 0; index < this.iboHandles.Count; ++index)
         {
           GL.Disable(EnableCap.Texture2D);
