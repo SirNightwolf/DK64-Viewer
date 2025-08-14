@@ -137,80 +137,94 @@ namespace DK64Viewer
       }
     }
 
-    private void Draw()
+   private void Draw()
+{
+    try
     {
-      try
-      {
+        // Clear + depth
         Core.ClearScreen();
+        GL.Enable(EnableCap.DepthTest);
+        GL.DepthFunc(DepthFunction.Lequal);
+        GL.Disable(EnableCap.CullFace);      // DK64 content sometimes expects double-sided
+        GL.Disable(EnableCap.Lighting);      // fixed-function lighting can wash out vertex colors
+
+        // Camera
         GL.PushMatrix();
         GL.LoadMatrix(this.camera.GetWorldToViewMatrix());
+
+        // --- Enable arrays
         GL.EnableClientState(EnableCap.VertexArray);
         GL.EnableClientState(EnableCap.ColorArray);
         GL.EnableClientState(EnableCap.TextureCoordArray);
-        GL.BindBuffer(BufferTarget.ArrayBuffer, this.vboVertexHandle);
-        GL.BufferData<float>(BufferTarget.ArrayBuffer, (IntPtr) (this.vertexData.Length * 4), this.vertexData, BufferUsageHint.StaticDraw);
-        GL.BindBuffer(BufferTarget.ArrayBuffer, 0);
+
+        // Vertex positions
         GL.BindBuffer(BufferTarget.ArrayBuffer, this.vboVertexHandle);
         GL.VertexPointer(3, VertexPointerType.Float, 0, IntPtr.Zero);
+
+        // Vertex colors (RGBA8 in DK64 Viewer buffers)
         GL.BindBuffer(BufferTarget.ArrayBuffer, this.vboColorHandle);
-        GL.ColorPointer(4, ColorPointerType.Float, 0, IntPtr.Zero);
+        GL.ColorPointer(4, ColorPointerType.UnsignedByte, 0, IntPtr.Zero);
+
+        // UVs (float2 in buffers)
         GL.BindBuffer(BufferTarget.ArrayBuffer, this.vboTexCoordHandle);
         GL.TexCoordPointer(2, TexCoordPointerType.Float, 0, IntPtr.Zero);
-        for (int index = 0; index < this.iboHandles.Count; ++index)
+
+        // Texture state: multiply texture * vertex color (N64-style modulate)
+        GL.Enable(EnableCap.Texture2D);
+        GL.TexEnv(TextureEnvTarget.TextureEnv, TextureEnvParameter.TextureEnvMode, (int)TextureEnvMode.Modulate);
+
+        // Alpha blending for IA / translucent combiner cases
+        GL.Enable(EnableCap.Blend);
+        GL.BlendFunc(BlendingFactor.SrcAlpha, BlendingFactor.OneMinusSrcAlpha);
+
+        // Draw each submesh (one IBO per material/texture)
+        int drawCount = Math.Min(this.iboHandles.Count, this.iboData.Count);
+        for (int i = 0; i < drawCount; i++)
         {
-          GL.Disable(EnableCap.Texture2D);
-          if (this.textures.Count > index)
-          {
-            if (this.textures[index] == -1)
+            // Bind texture if present, else render vertex-color only
+            int texId = (i < this.textures.Count) ? this.textures[i] : 0;
+            if (texId > 0)
             {
-              GL.Disable(EnableCap.Texture2D);
+                GL.Enable(EnableCap.Texture2D);
+                GL.BindTexture(TextureTarget.Texture2D, texId);
+
+                // N64 is nearest filtered, clamp/wrap per tile; default to nearest here
+                GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMinFilter, (int)TextureMinFilter.Nearest);
+                GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMagFilter, (int)TextureMagFilter.Nearest);
             }
             else
             {
-              GL.Enable(EnableCap.Texture2D);
-              GL.BindTexture(TextureTarget.Texture2D, this.textures[index]);
+                GL.BindTexture(TextureTarget.Texture2D, 0);
+                GL.Disable(EnableCap.Texture2D);
             }
-          }
-          if (this.modelFile.FileType == ModelFileType.Character)
-          {
-            GL.BindBuffer(BufferTarget.ElementArrayBuffer, this.iboHandles[index]);
-            GL.DrawElements(PrimitiveType.Triangles, ((IEnumerable<ushort>) this.iboData[index]).Count<ushort>(), DrawElementsType.UnsignedShort, IntPtr.Zero);
-          }
-          else
-          {
-            GL.BindBuffer(BufferTarget.ElementArrayBuffer, this.iboHandles[index]);
-            GL.DrawElements(PrimitiveType.Triangles, ((IEnumerable<ushort>) this.iboData[index]).Count<ushort>(), DrawElementsType.UnsignedShort, IntPtr.Zero);
-          }
-        }
-        foreach (Matrix4 matrix in this.matrices)
-        {
-          GL.PushMatrix();
-          GL.Translate(matrix.matrix[0, 3], matrix.matrix[1, 3], matrix.matrix[2, 3]);
-          Core.DrawCube(-2, -2, -2, 2, 2, 2);
-          GL.PopMatrix();
-        }
-        GL.BindBuffer(BufferTarget.ArrayBuffer, 0);
-        GL.BindBuffer(BufferTarget.ElementArrayBuffer, 0);
-        GL.DisableClientState(EnableCap.VertexArray);
-        GL.DisableClientState(EnableCap.ColorArray);
-        GL.DisableClientState(EnableCap.TextureCoordArray);
-        Core.PopMatrix();
-        this.DKOpenGLC.SwapBuffers();
-        this.UpdateCameraLocationTextBoxes();
-      }
-      catch (Exception ex)
-      {
-        int num = (int) MessageBox.Show(ex.Message);
-        GL.BindBuffer(BufferTarget.ArrayBuffer, 0);
-        GL.BindBuffer(BufferTarget.ElementArrayBuffer, 0);
-        GL.DisableClientState(EnableCap.VertexArray);
-        GL.DisableClientState(EnableCap.ColorArray);
-        GL.DisableClientState(EnableCap.TextureCoordArray);
-        Core.PopMatrix();
-        this.DKOpenGLC.SwapBuffers();
-      }
-    }
 
+            // Bind index buffer & draw
+            GL.BindBuffer(BufferTarget.ElementArrayBuffer, this.iboHandles[i]);
+            int indexCount = this.iboData[i]?.Length ?? 0;
+            if (indexCount > 0)
+            {
+                GL.DrawElements(PrimitiveType.Triangles, indexCount, DrawElementsType.UnsignedShort, IntPtr.Zero);
+            }
+        }
+
+        // Cleanup
+        GL.BindBuffer(BufferTarget.ElementArrayBuffer, 0);
+        GL.BindTexture(TextureTarget.Texture2D, 0);
+        GL.Disable(EnableCap.Texture2D);
+        GL.Disable(EnableCap.Blend);
+
+        GL.DisableClientState(EnableCap.TextureCoordArray);
+        GL.DisableClientState(EnableCap.ColorArray);
+        GL.DisableClientState(EnableCap.VertexArray);
+
+        GL.PopMatrix();
+        this.DKOpenGLC.SwapBuffers();
+    }
+    catch
+    {
+        // swallow to keep the app responsive; you can log here if you like
+    }
+}
     private void UpdateCameraLocationTextBoxes()
     {
       this.dkViewerTextUpdate = true;
