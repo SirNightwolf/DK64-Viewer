@@ -1,106 +1,153 @@
 ﻿// Decompiled with JetBrains decompiler
+//Edited by NightwolfPrime with some help from ChatGPT
 // Type: DK64Viewer.Texture
 // Assembly: DK64Viewer, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null
 // MVID: 34C2999C-2061-412A-B2F3-E6D2C8F1D38B
 // Assembly location: F:\DKViewer_0.04a\DK64Viewer.exe
 
+using System;
+using OpenTK.Graphics.OpenGL;
+
 namespace DK64Viewer
 {
-  public class Texture
-  {
-    public string file = "";
-    public uint pointer;
-    public uint indexID;
-    public uint id;
-    public int textureSize;
-    public int textureWidth;
-    public int textureHeight;
-    public float textureHRatio;
-    public float textureWRatio;
-    public uint textureOffset;
-    public uint indexOffset;
-    public int palSize;
-    public byte[] palette;
-    public byte[] red;
-    public byte[] green;
-    public byte[] blue;
-    public byte[] alpha;
-    public int glIndex;
-    public bool palLoaded;
-    public byte[] pixels;
+    public enum N64TexFormat { RGBA16, IA8, IA16, I4, I8, CI4, CI8 }
 
-    public static Texture Clone(Texture t) => new Texture(t.pointer, t.textureOffset, t.textureWidth, t.textureHeight)
+    public sealed class Texture : IDisposable
     {
-      alpha = t.alpha,
-      blue = t.blue,
-      file = t.file,
-      glIndex = t.glIndex,
-      green = t.green,
-      id = t.id,
-      indexID = t.indexID,
-      indexOffset = t.indexOffset,
-      palette = t.palette,
-      palLoaded = t.palLoaded,
-      palSize = t.palSize,
-      pixels = t.pixels,
-      pointer = t.pointer,
-      red = t.red,
-      textureHRatio = t.textureHRatio,
-      textureSize = t.textureSize,
-      textureWRatio = t.textureWRatio,
-      textureOffset = t.textureOffset
-    };
+        public int Id { get; private set; }
+        public int Width { get; private set; }
+        public int Height { get; private set; }
 
-    public Texture(uint pointer_, uint textureOffset_, int textureWidth_, int textureHeight_)
-    {
-      this.pointer = pointer_;
-      this.textureOffset = textureOffset_;
-      this.textureWidth = textureWidth_;
-      this.textureHeight = textureHeight_;
-      this.indexOffset = this.textureOffset + 32U;
-      this.textureSize = this.textureWidth * this.textureHeight * 2;
+        private Texture() { }
+        public void Dispose() { if (Id != 0) { GL.DeleteTexture(Id); Id = 0; } }
+
+        public static Texture FromRGBA8(byte[] rgba, int width, int height, bool clampS=false, bool clampT=false)
+        {
+            if (rgba == null) throw new ArgumentNullException(nameof(rgba));
+            if (rgba.Length != width * height * 4) throw new ArgumentException("RGBA buffer length must be width*height*4.");
+            var tex = new Texture { Width = width, Height = height };
+            tex.Id = GL.GenTexture();
+            GL.BindTexture(TextureTarget.Texture2D, tex.Id);
+            GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMinFilter, (int)TextureMinFilter.Nearest);
+            GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMagFilter, (int)TextureMagFilter.Nearest);
+            GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureWrapS, (int)(clampS ? TextureWrapMode.Clamp : TextureWrapMode.Repeat));
+            GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureWrapT, (int)(clampT ? TextureWrapMode.Clamp : TextureWrapMode.Repeat));
+            GL.PixelStore(PixelStoreParameter.UnpackAlignment, 1);
+            GL.TexImage2D(TextureTarget.Texture2D, 0, PixelInternalFormat.Rgba, width, height, 0, PixelFormat.Bgra, PixelType.UnsignedByte, rgba);
+            GL.BindTexture(TextureTarget.Texture2D, 0);
+            return tex;
+        }
+
+        public static Texture FromN64Bytes(N64TexFormat format, byte[] texData, int width, int height,
+                                           byte[] tlutRgba16=null, bool clampS=false, bool clampT=false)
+        {
+            if (texData == null) throw new ArgumentNullException(nameof(texData));
+            if (width<=0 || height<=0) throw new ArgumentOutOfRangeException("Invalid width/height.");
+            byte[] rgba = format switch
+            {
+                N64TexFormat.RGBA16 => DecodeRGBA16(texData),
+                N64TexFormat.IA8    => DecodeIA8(texData),
+                N64TexFormat.IA16   => DecodeIA16(texData),
+                N64TexFormat.I4     => DecodeI4(texData),
+                N64TexFormat.I8     => DecodeI8(texData),
+                N64TexFormat.CI4    => DecodeCI4(texData, tlutRgba16),
+                N64TexFormat.CI8    => DecodeCI8(texData, tlutRgba16),
+                _ => throw new NotSupportedException()
+            };
+            if (rgba.Length != width * height * 4) throw new InvalidOperationException("Decoded buffer size mismatch.");
+            return FromRGBA8(rgba, width, height, clampS, clampT);
+        }
+
+        private static byte[] DecodeRGBA16(byte[] src)
+        {
+            if (src.Length % 2 != 0) throw new ArgumentException("RGBA16 length must be even.");
+            int pix = src.Length / 2;
+            var outp = new byte[pix * 4]; int o=0;
+            for (int i=0;i<src.Length;i+=2)
+            {
+                ushort p = (ushort)((src[i]<<8)|src[i+1]);
+                byte r=(byte)(((p>>11)&0x1F)*255/31);
+                byte g=(byte)(((p>>6)&0x1F)*255/31);
+                byte b=(byte)(((p>>1)&0x1F)*255/31);
+                byte a=(byte)((p&1)!=0?255:0);
+                outp[o++]=b; outp[o++]=g; outp[o++]=r; outp[o++]=a;
+            }
+            return outp;
+        }
+
+        private static byte[] DecodeIA8(byte[] src)
+        {
+            var outp=new byte[src.Length*4]; int o=0;
+            for(int i=0;i<src.Length;i++)
+            {
+                byte b=src[i]; byte i4=(byte)((b>>4)&0xF); byte a4=(byte)(b&0xF);
+                byte I=(byte)(i4*17); byte A=(byte)(a4*17);
+                outp[o++]=I; outp[o++]=I; outp[o++]=I; outp[o++]=A;
+            }
+            return outp;
+        }
+
+        private static byte[] DecodeIA16(byte[] src)
+        {
+            if (src.Length%2!=0) throw new ArgumentException("IA16 length must be even.");
+            var outp=new byte[(src.Length/2)*4]; int o=0;
+            for (int i=0;i<src.Length;i+=2)
+            {
+                byte I=src[i], A=src[i+1];
+                outp[o++]=I; outp[o++]=I; outp[o++]=I; outp[o++]=A;
+            }
+            return outp;
+        }
+
+        private static byte[] DecodeI4(byte[] src)
+        {
+            var outp=new byte[src.Length*2*4]; int o=0;
+            for(int i=0;i<src.Length;i++)
+            {
+                byte b=src[i]; byte hi=(byte)((b>>4)&0xF), lo=(byte)(b&0xF);
+                byte Ihi=(byte)(hi*17), Ilo=(byte)(lo*17);
+                outp[o++]=Ihi; outp[o++]=Ihi; outp[o++]=Ihi; outp[o++]=255;
+                outp[o++]=Ilo; outp[o++]=Ilo; outp[o++]=Ilo; outp[o++]=255;
+            }
+            return outp;
+        }
+
+        private static byte[] DecodeI8(byte[] src)
+        {
+            var outp=new byte[src.Length*4]; int o=0;
+            for(int i=0;i<src.Length;i++)
+            {
+                byte I=src[i];
+                outp[o++]=I; outp[o++]=I; outp[o++]=I; outp[o++]=255;
+            }
+            return outp;
+        }
+
+        private static byte[] DecodeCI4(byte[] tex, byte[] tlutRGBA16)
+        {
+            if (tlutRGBA16==null || tlutRGBA16.Length==0) throw new ArgumentNullException(nameof(tlutRGBA16));
+            byte[] pal = DecodeRGBA16(tlutRGBA16);
+            var outp=new byte[tex.Length*2*4]; int o=0;
+            for(int i=0;i<tex.Length;i++)
+            {
+                byte b=tex[i]; int hi=(b>>4)&0xF, lo=b&0xF;
+                int p=hi*4; outp[o++]=pal[p+0]; outp[o++]=pal[p+1]; outp[o++]=pal[p+2]; outp[o++]=pal[p+3];
+                p=lo*4;    outp[o++]=pal[p+0]; outp[o++]=pal[p+1]; outp[o++]=pal[p+2]; outp[o++]=pal[p+3];
+            }
+            return outp;
+        }
+
+        private static byte[] DecodeCI8(byte[] tex, byte[] tlutRGBA16)
+        {
+            if (tlutRGBA16==null || tlutRGBA16.Length==0) throw new ArgumentNullException(nameof(tlutRGBA16));
+            byte[] pal=DecodeRGBA16(tlutRGBA16);
+            var outp=new byte[tex.Length*4]; int o=0;
+            for(int i=0;i<tex.Length;i++)
+            {
+                int idx=tex[i]*4;
+                outp[o++]=pal[idx+0]; outp[o++]=pal[idx+1]; outp[o++]=pal[idx+2]; outp[o++]=pal[idx+3];
+            }
+            return outp;
+        }
     }
-
-    public void setRatio(float sScale, float tScale)
-    {
-      this.textureHRatio = tScale / 32f / (float) this.textureHeight;
-      this.textureWRatio = sScale / 32f / (float) this.textureWidth;
-    }
-
-    public void loadPalette(byte[] bytesInFile, int palSize)
-    {
-      this.palSize = palSize / 2;
-      this.palette = new byte[palSize];
-      this.red = new byte[palSize / 2];
-      this.green = new byte[palSize / 2];
-      this.blue = new byte[palSize / 2];
-      this.alpha = new byte[palSize / 2];
-      int index1 = 0;
-      for (uint index2 = 0; (long) index2 < (long) palSize; ++index2)
-      {
-        this.palette[index1] = bytesInFile[(int) index2];
-        ++index1;
-      }
-      int index3 = 0;
-      for (int index4 = 0; index4 < palSize / 2; ++index4)
-      {
-        this.red[index4] = this.palette[index3];
-        this.red[index4] >>= 3;
-        this.red[index4] *= (byte) 8;
-        ushort num = (ushort) ((uint) (ushort) ((uint) (ushort) ((uint) (ushort) ((uint) this.palette[index3] * 256U + (uint) this.palette[index3 + 1]) << 5) >> 3) >> 8);
-        this.green[index4] = (byte) num;
-        this.green[index4] *= (byte) 8;
-        this.blue[index4] = this.palette[index3 + 1];
-        this.blue[index4] <<= 2;
-        this.blue[index4] >>= 3;
-        this.blue[index4] *= (byte) 8;
-        this.alpha[index4] = this.palette[index3 + 1];
-        this.alpha[index4] <<= 7;
-        this.alpha[index4] >>= 7;
-        this.alpha[index4] = this.alpha[index4] != (byte) 1 ? (byte) 0 : byte.MaxValue;
-        index3 += 2;
-      }
-      this.palLoaded = true;
-    }
-  }
 }
