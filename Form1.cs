@@ -1,4 +1,5 @@
 ﻿// Decompiled with JetBrains decompiler
+//Edited by Nightwolf Prime using ChatGPT
 // Type: DK64Viewer.Form1
 // Assembly: DK64Viewer, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null
 // MVID: 34C2999C-2061-412A-B2F3-E6D2C8F1D38B
